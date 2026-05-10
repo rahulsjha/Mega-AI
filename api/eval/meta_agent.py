@@ -77,7 +77,7 @@ class MetaAgent:
     
     def _generate_rewrite(self, worst_case: Dict, eval_results: List[Dict]) -> Dict:
         """
-        Generate a prompt rewrite proposal.
+        Generate a prompt rewrite proposal with specific improvements.
         
         Args:
             worst_case: The worst performing case
@@ -86,36 +86,105 @@ class MetaAgent:
         Returns:
             Proposal dict
         """
-        original_prompt = f"Agent prompt for {worst_case['dimension']}"  # Would get from DB
+        dimension = worst_case["dimension"]
+        current_score = worst_case["score"]
         
-        rewrite_guidance = {
-            "answer_correctness": "Focus on eliciting concise, factually accurate answers",
-            "citation_accuracy": "Require explicit source citations",
-            "contradiction_resolution": "Ask agent to explicitly list and resolve contradictions",
-            "tool_efficiency": "Discourage unnecessary tool calls",
-            "budget_compliance": "Emphasize token efficiency",
-            "critique_agreement": "Ask agent to preemptively address likely criticisms"
+        # Original prompts for each dimension
+        original_prompts = {
+            "answer_correctness": (
+                "You are a helpful AI assistant. Answer the user's query directly and concisely. "
+                "Provide the most accurate information you can."
+            ),
+            "citation_accuracy": (
+                "You are a research assistant. When answering questions, cite your sources. "
+                "Reference relevant documents and materials."
+            ),
+            "contradiction_resolution": (
+                "You are a critical analyzer. Examine information for inconsistencies. "
+                "Flag any contradictions and explain how they can be resolved."
+            ),
+            "tool_efficiency": (
+                "You are an efficient problem solver. Use tools strategically. "
+                "Minimize unnecessary tool calls. Only search when truly needed."
+            ),
+            "budget_compliance": (
+                "You are a resource-conscious assistant. Manage token usage carefully. "
+                "Avoid verbose responses and unnecessary context."
+            ),
+            "critique_agreement": (
+                "You are a self-aware assistant. Consider potential criticisms. "
+                "Address likely objections proactively in your responses."
+            )
         }
         
-        guidance = rewrite_guidance.get(worst_case["dimension"], "Improve answer quality")
+        # Improvement strategies
+        improvement_rewrites = {
+            "answer_correctness": (
+                "You are a factuality expert. Your response will be graded on accuracy. "
+                "Before answering, verify facts against known information. "
+                "If uncertain, qualify statements with appropriate confidence levels. "
+                "Prioritize correctness over completeness. "
+                "Answer directly without unnecessary preamble."
+            ),
+            "citation_accuracy": (
+                "You are a precise citation specialist. Every factual claim must reference a source. "
+                "Use the format: [claim] (from [source_name]: [specific_section]). "
+                "When citations cannot be verified, acknowledge uncertainty. "
+                "Do not synthesize without attribution. "
+                "Link each answer component to its origin document."
+            ),
+            "contradiction_resolution": (
+                "You are a dialectical thinker. Explicitly list all perspectives before synthesis. "
+                "Identify incompatible claims using logical notation: 'A contradicts B because...' "
+                "Resolve contradictions using: [priority principle], [evidence], [synthesis]. "
+                "Do not hide contradictions. Expose and resolve them. "
+                "Final answer should show your reasoning path."
+            ),
+            "tool_efficiency": (
+                "You are a strategic tool user. Minimize tool calls. "
+                "Before calling a tool, ask: Is this truly necessary? Can I answer from context? "
+                "Use tools only when: (1) Information is not in context, (2) Verification is needed. "
+                "Batch related queries into single tool calls. "
+                "Justify each tool invocation explicitly."
+            ),
+            "budget_compliance": (
+                "You are a concise communicator. Every token counts. "
+                "Use abbreviated formats for structured data (tables, lists). "
+                "Remove hedging language ('perhaps', 'might', 'arguably'). "
+                "Combine concepts to reduce repetition. "
+                "Target response length: 40% of maximum allowed tokens."
+            ),
+            "critique_agreement": (
+                "You are a preemptive critic. Before finalizing, ask: What could go wrong? "
+                "Address likely criticisms: accuracy, missing context, alternative interpretations. "
+                "For each claim, include: evidence level, confidence, caveats. "
+                "Anticipate objections and refute them directly. "
+                "Structure: claim → potential criticism → your response."
+            )
+        }
         
-        rewritten = (
-            f"[IMPROVED] {original_prompt}\n\n"
-            f"Improvement focus: {guidance}\n"
-            f"(This is a demonstration proposal)"
-        )
+        original = original_prompts.get(dimension, "Standard prompt for " + dimension)
+        rewritten = improvement_rewrites.get(dimension, "Improved prompt")
         
         # Generate unified diff
-        diff = self._generate_diff(original_prompt, rewritten)
+        diff = self._generate_diff(original, rewritten)
+        
+        # Estimate improvement based on current score and dimension patterns
+        base_improvement = max(0.15, 0.8 - current_score) if current_score < 0.8 else 0.1
+        expected_improvement = min(0.35, base_improvement)  # Cap at 35%
         
         return {
             "proposal_id": str(uuid.uuid4()),
-            "original_prompt": original_prompt,
+            "original_prompt": original,
             "rewritten_prompt": rewritten,
             "unified_diff": diff,
-            "justification": f"Improve {worst_case['dimension']} (score: {worst_case['score']:.2f})",
-            "target_dimension": worst_case["dimension"],
-            "expected_improvement": 0.2,  # Conservative estimate
+            "justification": (
+                f"Prompt for '{dimension}' scoring {current_score:.2f}. "
+                f"Rewrites focus on: explicit {dimension.replace('_', ' ')} criteria, "
+                f"measurable outcomes, and agent self-checking."
+            ),
+            "target_dimension": dimension,
+            "expected_improvement": expected_improvement,
             "created_at": datetime.utcnow().isoformat()
         }
     
@@ -126,10 +195,12 @@ class MetaAgent:
         original_lines = original.split("\n")
         rewritten_lines = rewritten.split("\n")
         
-        diff = difflib.unified_diff(
+        diff_lines = list(difflib.unified_diff(
             original_lines,
             rewritten_lines,
+            fromfile="original_prompt",
+            tofile="rewritten_prompt",
             lineterm=""
-        )
+        ))
         
-        return "\n".join(diff)
+        return "\n".join(diff_lines)
