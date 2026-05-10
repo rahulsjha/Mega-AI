@@ -4,7 +4,7 @@ Tests for scoring functions.
 
 import pytest
 from api.context.schema import (
-    AgentContext, CritiqueResult, ProvenanceEntry, Chunk, AgentOutput
+    AgentContext, CritiqueResult, ProvenanceEntry, Chunk, AgentOutput, PolicyViolation
 )
 from api.eval.scoring import ScoringEngine, compute_all_scores
 from uuid import uuid4
