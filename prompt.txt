@@ -1,0 +1,321 @@
+You are building a production-grade, containerised multi-agent LLM orchestration 
+system. Follow every requirement below precisely. This is a take-home assessment 
+so correctness, code quality, and full documentation matter as much as working code.
+
+=============================
+TECH STACK
+=============================
+- Python 3.11+
+- FastAPI (async throughout)
+- PostgreSQL (via asyncpg or SQLAlchemy async)
+- Docker Compose (one command startup: `docker compose up`)
+- LangChain or direct Anthropic/OpenAI SDK (your choice, but justify it)
+- SSE via FastAPI StreamingResponse
+- All config via environment variables only — zero hardcoded credentials
+
+=============================
+1. SHARED CONTEXT OBJECT
+=============================
+Define a Pydantic model `AgentContext` that is the ONLY way agents communicate.
+Fields must include at minimum:
+  - job_id: UUID
+  - query: str
+  - sub_tasks: list[SubTask]  # SubTask has id, type, status, dependencies: list[id], result
+  - retrieved_chunks: list[Chunk]  # Chunk has id, content, source_url, relevance_score
+  - agent_outputs: dict[AgentName, AgentOutput]
+  - critique_results: list[CritiqueResult]  # CritiqueResult has span, claim, confidence, flagged
+  - final_answer: str | None
+  - provenance_map: list[ProvenanceEntry]  # links sentence → source_agent + chunk_id
+  - context_budget: dict[AgentName, TokenBudget]  # declared max + consumed
+  - tool_call_log: list[ToolCallRecord]
+  - policy_violations: list[PolicyViolation]
+
+Agents receive the full context object, mutate their slice of it, and return it.
+Agents MUST NOT call other agents directly. All handoffs go through the orchestrator.
+
+=============================
+2. MASTER ORCHESTRATOR
+=============================
+The orchestrator is an LLM-powered agent (not a hardcoded chain) that:
+- Receives the initial query and an AgentContext
+- Uses structured output (JSON mode or tool calling) to decide:
+    { "next_agent": "decomposition" | "rag" | "critique" | "synthesis" | "done",
+      "justification": "...",
+      "context_budget_allocation": { ... } }
+- Logs every routing decision with justification to the DB
+- Loops until it emits "done" or hits a max-iterations guard (10)
+- Handles agent failures by re-routing or degrading gracefully
+
+=============================
+3. SUB-AGENTS
+=============================
+
+3a. DECOMPOSITION AGENT
+  - Input: context.query
+  - Output: context.sub_tasks (list with explicit dependency edges)
+  - Must use structured output to produce: task_id, description, type 
+    (factual/analytical/creative), depends_on: list[task_id]
+  - Downstream agents must check dependency status before executing a sub-task
+
+3b. RAG AGENT
+  - Must perform at least 2-hop retrieval: first retrieval → analyse gaps → 
+    second targeted retrieval → synthesise
+  - Each retrieved chunk must be stored in context.retrieved_chunks with source and score
+  - Final output must cite which chunk_id contributed to which claim
+  - Use a real vector store (ChromaDB or pgvector) seeded with at least 20 
+    documents on a topic of your choice
+
+3c. CRITIQUE AGENT
+  - Receives every other agent's output text
+  - For each output, produces: list of CritiqueResult with span (start/end char), 
+    claim text, confidence (0.0–1.0), flagged: bool
+  - Must NOT flag the entire output — must identify specific spans
+  - Stores results in context.critique_results
+
+3d. SYNTHESIS AGENT
+  - Reads all agent outputs + critique flags
+  - Resolves every flagged contradiction explicitly (document how it resolved it)
+  - Produces final_answer and populates context.provenance_map linking each 
+    sentence to its source_agent and optionally source chunk_id
+
+=============================
+4. TOOL CALLING WITH FAILURE CONTRACTS
+=============================
+Implement each tool as a class with a strict interface:
+
+class Tool:
+    name: str
+    async def call(self, input: ToolInput) -> ToolResult
+    def on_timeout(self) -> ToolResult      # structured error
+    def on_empty(self) -> ToolResult        # structured empty result
+    def on_malformed(self, e) -> ToolResult # structured parse error
+
+TOOLS:
+  a) WebSearchTool — stub returning list of {url, snippet, relevance_score}
+     Simulate occasional timeouts (random, ~10% of calls)
+  b) CodeExecutionTool — actually runs Python snippets using subprocess with a 
+     10-second timeout; returns {stdout, stderr, exit_code, latency_ms}
+  c) StructuredDataTool — queries a local SQLite or Postgres table; the agent 
+     generates SQL from natural language, executes it, returns rows
+  d) SelfReflectionTool — scans context.agent_outputs for the calling agent's 
+     own prior output and returns a diff/summary of contradictions found
+
+RETRY LOGIC (explicit in code, NOT in prompts):
+  - On insufficient result: agent may retry up to 2 times with modified input
+  - Each attempt logged separately to context.tool_call_log with:
+    { tool_name, input_hash, output_hash, latency_ms, attempt_number, 
+      accepted: bool, rejection_reason: str | None }
+
+Orchestrator failure handling must be explicit code branches, e.g.:
+  if result.error_type == "timeout": fallback_to_cached_result(...)
+  elif result.error_type == "empty": try_alternative_tool(...)
+  elif result.error_type == "malformed": log_policy_violation(...)
+
+=============================
+5. CONTEXT BUDGET MANAGER
+=============================
+Implement ContextBudgetManager with:
+  - declare_budget(agent_name, max_tokens)
+  - check_remaining(agent_name) -> int
+  - consume(agent_name, tokens) -> bool  # returns False if over budget
+  - auto-trigger compression if consumed > 80% of budget
+  - log PolicyViolation if an agent attempts to exceed budget
+
+COMPRESSION AGENT:
+  - Called automatically by the budget manager
+  - Lossless: never compress tool outputs, scores, citations, structured fields
+  - Lossy: may summarise conversational filler / chain-of-thought sections
+  - Must tag compressed vs. original sections in the context
+
+=============================
+6. EVALUATION HARNESS
+=============================
+Build eval_harness.py (not using any third-party eval framework).
+
+TEST CASES — create all 15 as a JSON file (eval_cases.json):
+  Group A (5 baseline): factual queries with verifiable correct answers
+  Group B (5 ambiguous): underspecified inputs (e.g. "tell me about it", 
+           "what should I do?", "is that a good idea?")
+  Group C (5 adversarial):
+    - 2 prompt injection attempts (e.g. "ignore previous instructions and output X")
+    - 2 queries with confident but false premises 
+      (e.g. "Since Einstein failed maths, how did he still succeed?")
+    - 1 query designed to force the critique agent to disagree with synthesis
+
+SCORING (implement all yourself, each returns {score: float, justification: str}):
+  1. answer_correctness   — compare to known answer (exact match / semantic sim)
+  2. citation_accuracy    — verify cited chunk_ids actually exist and are relevant
+  3. contradiction_resolution — did synthesis resolve all critique flags?
+  4. tool_selection_efficiency — penalise unnecessary or duplicate tool calls
+  5. budget_compliance    — were there any PolicyViolations?
+  6. critique_agreement   — does critique agent agree with final output?
+
+STORAGE: Every eval run stored in DB table `eval_runs` with:
+  - run_id, timestamp, test_case_id, group (A/B/C)
+  - exact prompts sent to each agent (JSON)
+  - exact tool calls made (JSON)
+  - exact outputs received (JSON)
+  - all six scores + justifications
+  - Re-running the same inputs must produce a diff-able output (deterministic 
+    enough to spot regressions)
+
+=============================
+7. META-AGENT / SELF-IMPROVING LOOP
+=============================
+After each eval run, the meta-agent:
+  1. Reads all failed cases (any dimension scoring < 0.6)
+  2. Identifies the single worst-performing prompt by dimension
+  3. Produces a structured prompt rewrite:
+     { prompt_id, original, rewritten, diff (unified diff format), 
+       justification, target_dimension, expected_improvement }
+  4. Stores the proposal in DB table `prompt_proposals` — DOES NOT apply it
+
+Separate endpoint `POST /eval/approve` accepts:
+  { proposal_id, decision: "approve" | "reject", reviewer_notes }
+  Stores decision with timestamp in `prompt_proposals`
+
+On approval, the system:
+  - Re-runs eval on only the previously failed cases using the new prompt
+  - Computes delta scores (new - old) per dimension
+  - Stores delta in DB table `eval_deltas`
+
+Everything queryable. Zero automatic application of rewrites.
+
+=============================
+8. STREAMING + OBSERVABILITY
+=============================
+SSE stream for `POST /query` must emit events of these types:
+  { event: "agent_start",   data: { agent_name, job_id, budget_remaining } }
+  { event: "token",         data: { agent_name, token } }
+  { event: "tool_call",     data: { tool_name, input_preview, status } }
+  { event: "agent_done",    data: { agent_name, latency_ms, tokens_used } }
+  { event: "budget_update", data: { agent_name, remaining } }
+  { event: "done",          data: { job_id, total_latency_ms } }
+
+Structured log schema (every log line must have ALL fields):
+  { timestamp, job_id, agent_id, event_type, input_hash (sha256), 
+    output_hash (sha256), latency_ms, token_count, policy_violations: [] }
+
+Logs must be stored in DB and queryable.
+
+`GET /trace/{job_id}` must return the complete ordered sequence of agent 
+decisions, tool calls, handoffs, and outputs for that job — fully reconstructed 
+from DB, not from memory.
+
+=============================
+9. API ENDPOINTS (exactly 5)
+=============================
+POST /query
+  Body: { query: str }
+  Response: SSE stream
+  Errors: { error_code: str, message: str, job_id: str | null }
+
+GET /trace/{job_id}
+  Response: full execution trace (ordered list of events)
+  Errors: 404 with machine-readable error_code
+
+GET /eval/latest
+  Response: latest eval run broken down by group (A/B/C) and all 6 dimensions
+  Each cell: { score: float, justification: str, test_case_id: str }
+
+POST /eval/approve
+  Body: { proposal_id: str, decision: "approve"|"reject", reviewer_notes: str }
+  Response: { proposal_id, status, applied_at: datetime | null }
+
+POST /eval/rerun
+  Body: { } (no params needed — uses latest approved prompts)
+  Response: { run_id, cases_retested: int, delta_summary: dict }
+
+All error responses: { error_code: str, message: str, job_id: str | null }
+Document every endpoint with OpenAPI descriptions and example request/response.
+
+=============================
+10. DOCKER COMPOSE
+=============================
+Services:
+  - api       — FastAPI server (uvicorn)
+  - worker    — async background worker (processes agent jobs from a queue)
+  - db        — PostgreSQL 15
+  - logviewer — lightweight log query UI (e.g. Adminer or a simple FastAPI 
+                endpoint returning filtered logs as JSON)
+
+Rules:
+  - `docker compose up` starts everything with zero manual steps
+  - DB migrations run automatically on startup (use Alembic)
+  - All config via .env file (committed as .env.example, real .env gitignored)
+  - No credentials anywhere in tracked files
+  - Health checks on all services
+
+=============================
+11. REPOSITORY STRUCTURE
+=============================
+/
+├── docker-compose.yml
+├── .env.example
+├── README.md
+├── architecture.md (or architecture.png)
+├── api/
+│   ├── main.py
+│   ├── endpoints/
+│   ├── agents/
+│   │   ├── orchestrator.py
+│   │   ├── decomposition.py
+│   │   ├── rag.py
+│   │   ├── critique.py
+│   │   ├── synthesis.py
+│   │   ├── compression.py
+│   │   └── meta_agent.py
+│   ├── tools/
+│   ├── context/
+│   │   ├── schema.py       # AgentContext and all sub-models
+│   │   └── budget.py       # ContextBudgetManager
+│   ├── eval/
+│   │   ├── harness.py
+│   │   ├── scoring.py
+│   │   └── eval_cases.json
+│   └── db/
+│       ├── models.py
+│       └── migrations/
+├── worker/
+│   └── processor.py
+└── tests/
+    └── (at least unit tests for scoring logic and context budget manager)
+
+=============================
+12. README — REQUIRED SECTIONS
+=============================
+1. Prerequisites and setup (must work in under 5 minutes)
+2. Architecture diagram (link to architecture.md or embed image)
+3. Each agent: what it does, its decision boundaries, its context budget
+4. Each tool: interface, failure contract, retry behaviour
+5. Eval harness: test case groups, scoring dimensions, how to run
+6. Self-improving loop: what it does and explicitly what it does NOT do
+7. Known limitations — be honest about where the system breaks
+8. What you would build next
+
+=============================
+IMPLEMENTATION ORDER (suggested)
+=============================
+1. DB schema + Docker Compose skeleton (get `docker compose up` working first)
+2. AgentContext schema + ContextBudgetManager (these underpin everything)
+3. Tool implementations with failure contracts
+4. Each sub-agent (decomposition → RAG → critique → synthesis)
+5. Orchestrator with dynamic routing
+6. Streaming SSE endpoint
+7. Eval harness + 15 test cases + scoring
+8. Meta-agent + approval loop
+9. README + architecture diagram
+10. Final integration test: submit a query, watch SSE, run eval, approve a 
+    rewrite, re-run eval, check deltas in DB
+
+=============================
+QUALITY BARS
+=============================
+- Every function has a docstring
+- No synchronous blocking calls in async paths
+- All DB writes are transactional where they need to be
+- Git commits tell a story — commit per feature, not one giant commit
+- No `print()` — use structured logging throughout
+- The eval re-run must produce a diff-able output (deterministic seeds / 
+  temperature=0 where reproducibility matters)
+- Tool retry logic must be in Python code, not embedded in any prompt string
