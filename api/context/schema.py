@@ -5,11 +5,14 @@ AgentContext is the ONLY way agents communicate. Every agent receives it,
 mutates its slice, and returns it to the orchestrator.
 """
 
+import logging
 from enum import Enum
 from typing import Optional, Any, Dict, List
 from uuid import UUID
 from datetime import datetime
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger(__name__)
 
 
 class SubTaskType(str, Enum):
@@ -153,42 +156,32 @@ class AgentContext(BaseModel):
     All agents receive the full context, mutate their assigned fields,
     and return it to the orchestrator. No agent calls another directly.
     """
-    # Identifiers
+
     job_id: UUID = Field(..., description="Unique job identifier")
     session_id: Optional[UUID] = Field(default=None, description="Session identifier")
-    
-    # Input
     query: str = Field(..., description="Original user query")
-    
-    # Task Decomposition
     sub_tasks: List[SubTask] = Field(default_factory=list, description="Tasks from decomposition")
-    
-    # Retrieval Augmented Generation
     retrieved_chunks: List[Chunk] = Field(default_factory=list, description="Retrieved chunks")
     retrieval_iteration: int = Field(default=0, description="Which retrieval iteration we're on")
-    
-    # Agent Results
+
+
     agent_outputs: Dict[str, AgentOutput] = Field(
         default_factory=dict,
         description="Results from each agent"
     )
     
-    # Critique Results
     critique_results: List[CritiqueResult] = Field(
         default_factory=list,
         description="All critique results"
     )
     
-    # Final Answer
     final_answer: Optional[str] = Field(default=None, description="Final synthesized answer")
     
-    # Provenance Tracking
     provenance_map: List[ProvenanceEntry] = Field(
         default_factory=list,
         description="Links sentences to sources"
     )
     
-    # Token/Resource Management
     context_budget: Dict[str, TokenBudget] = Field(
         default_factory=dict,
         description="Budget tracking per agent"
@@ -198,19 +191,16 @@ class AgentContext(BaseModel):
         description="History of compressions applied"
     )
     
-    # Tool Execution
     tool_call_log: List[ToolCallRecord] = Field(
         default_factory=list,
         description="All tool calls made during execution"
     )
     
-    # Policy Violations
     policy_violations: List[PolicyViolation] = Field(
         default_factory=list,
         description="Any policy violations that occurred"
     )
     
-    # Orchestrator State
     routing_history: List[RoutingDecision] = Field(
         default_factory=list,
         description="History of orchestrator routing decisions"
@@ -219,13 +209,40 @@ class AgentContext(BaseModel):
     started_at: datetime = Field(default_factory=datetime.utcnow)
     completed_at: Optional[datetime] = Field(default=None)
     
-    # Metadata
     metadata: Dict[str, Any] = Field(default_factory=dict, description="Arbitrary metadata")
     
+    event_callbacks: List[Any] = Field(
+        default_factory=list,
+        description="Callbacks to emit events for SSE streaming"
+    )
+    
     class Config:
-        """Pydantic configuration."""
         arbitrary_types_allowed = True
     
     def model_dump_json(self, **kwargs) -> str:
-        """Override to handle datetime serialization."""
         return super().model_dump_json(**kwargs)
+    
+    async def emit_event(self, event_type: str, data: Dict[str, Any], agent_id: Optional[str] = None, latency_ms: float = 0.0):
+        """
+        Emit an event to all registered callbacks.
+        
+        Args:
+            event_type: Type of event (agent_start, token, tool_call, etc.)
+            data: Event-specific data dictionary
+            agent_id: Optional agent ID for the event
+            latency_ms: Optional latency in milliseconds
+        """
+        event = {
+            "event_type": event_type,
+            "job_id": str(self.job_id),
+            "agent_id": agent_id,
+            "data": data,
+            "latency_ms": latency_ms,
+            "timestamp": datetime.utcnow().isoformat()
+        }
+        for callback in self.event_callbacks:
+            try:
+                if callable(callback):
+                    await callback(event) if hasattr(callback, '__await__') else callback(event)
+            except Exception as e:
+                logger.warning(f"Event callback failed: {e}")

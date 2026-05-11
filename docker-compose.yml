@@ -20,6 +20,22 @@ services:
     networks:
       - mega-ai-net
 
+  redis:
+    image: redis:7-alpine
+    container_name: mega-ai-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - mega-ai-net
+    command: redis-server --appendonly yes
+
   api:
     build:
       context: .
@@ -29,12 +45,17 @@ services:
       - "8000:8000"
     environment:
       DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
       LOG_LEVEL: ${LOG_LEVEL}
       ENVIRONMENT: ${ENVIRONMENT}
     depends_on:
       db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
@@ -51,20 +72,28 @@ services:
     container_name: mega-ai-worker
     environment:
       DATABASE_URL: ${DATABASE_URL}
+      REDIS_URL: ${REDIS_URL:-redis://redis:6379/0}
       OPENAI_API_KEY: ${OPENAI_API_KEY}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-openai/gpt-4o-mini}
+      OPENROUTER_BASE_URL: ${OPENROUTER_BASE_URL:-https://openrouter.ai/api/v1}
       LOG_LEVEL: ${LOG_LEVEL}
       ENVIRONMENT: ${ENVIRONMENT}
     depends_on:
       db:
         condition: service_healthy
-    healthcheck:
-      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      redis:
+        condition: service_healthy
     networks:
       - mega-ai-net
+
+volumes:
+  db_data:
+  redis_data:
+
+networks:
+  mega-ai-net:
+    driver: bridge
 
 volumes:
   db_data:

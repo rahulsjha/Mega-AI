@@ -16,12 +16,11 @@ from api.context.schema import (
     AgentContext, Chunk, AgentOutput
 )
 from api.context.budget import ContextBudgetManager
+from api.llm import build_openrouter_llm
+from langchain_openai import ChatOpenAI
 import os
 
 logger = logging.getLogger(__name__)
-
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
-
 
 class RAGAgent:
     """
@@ -45,12 +44,12 @@ class RAGAgent:
     
     def _init_llm(self):
         """Initialize LLM client."""
-        if LLM_PROVIDER == "anthropic":
-            from anthropic import Anthropic
-            self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        else:
-            from openai import OpenAI
-            self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        self.client = build_openrouter_llm(3000)
+        if self.client is not None:
+            return
+
+        from openai import OpenAI
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     
     def _init_vector_store(self):
         """Initialize ChromaDB vector store with sample data."""
@@ -67,13 +66,12 @@ class RAGAgent:
             
             self.chroma_client = chromadb.Client(settings)
             
-            # Get or create collection
+            
             self.collection = self.chroma_client.get_or_create_collection(
                 name="mega_ai_docs",
                 metadata={"hnsw:space": "cosine"}
             )
             
-            # Seed with sample documents if empty
             if self.collection.count() == 0:
                 self._seed_sample_data()
             
@@ -316,21 +314,17 @@ Return JSON:
     "refined_queries": ["query1", "query2"]
 }}"""
             
-            if LLM_PROVIDER == "anthropic":
-                message = self.client.messages.create(
-                    model="claude-3-sonnet-20240229",
-                    max_tokens=500,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                response = message.content[0].text
-            else:
-                response = self.client.chat.completions.create(
-                    model="gpt-4-turbo-preview",
-                    max_tokens=500,
-                    response_format={"type": "json_object"},
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                response = response.choices[0].message.content
+            if isinstance(self.client, ChatOpenAI):
+                response = self.client.invoke(prompt).content
+                return json.loads(response)
+
+            response = self.client.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                max_tokens=500,
+                response_format={"type": "json_object"},
+                messages=[{"role": "user", "content": prompt}]
+            )
+            response = response.choices[0].message.content
             
             return json.loads(response)
         
@@ -369,20 +363,15 @@ Create a comprehensive answer that:
 
 Return as plain text (not JSON)."""
             
-            if LLM_PROVIDER == "anthropic":
-                message = self.client.messages.create(
-                    model="claude-3-sonnet-20240229",
-                    max_tokens=1000,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                return message.content[0].text
-            else:
-                response = self.client.chat.completions.create(
-                    model="gpt-4-turbo-preview",
-                    max_tokens=1000,
-                    messages=[{"role": "user", "content": prompt}]
-                )
-                return response.choices[0].message.content
+            if isinstance(self.client, ChatOpenAI):
+                return self.client.invoke(prompt).content
+
+            response = self.client.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                max_tokens=1000,
+                messages=[{"role": "user", "content": prompt}]
+            )
+            return response.choices[0].message.content
         
         except Exception as e:
             logger.error(f"Chunk synthesis failed: {str(e)}")

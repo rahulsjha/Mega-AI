@@ -93,8 +93,8 @@ class TestAgentContextModel:
             claim="False claim",
             confidence=0.95,
             flagged=True,
-            reasoning="This is incorrect"
-                   source_agent="test"
+            reasoning="This is incorrect",
+            source_agent="test"
         )
         
         context.critique_results.append(critique)
@@ -311,8 +311,8 @@ class TestCritiqueSpanAnalysis:
             claim="Specific claim",
             confidence=0.98,
             flagged=True,
-            reasoning="This is problematic"
-                   source_agent="test"
+            reasoning="This is problematic",
+            source_agent="test"
         )
         
         context.critique_results.append(critique)
@@ -333,9 +333,9 @@ class TestCritiqueSpanAnalysis:
                 span_end=10,
                 claim="First issue",
                 confidence=0.95,
-                flagged=True
-                           reasoning="First problem",
-                           source_agent="test"
+                flagged=True,
+                reasoning="First problem",
+                source_agent="test"
             ),
             CritiqueResult(
                 id="c2",
@@ -343,9 +343,9 @@ class TestCritiqueSpanAnalysis:
                 span_end=70,
                 claim="Second issue",
                 confidence=0.88,
-                               reasoning="Second problem",
-                               source_agent="test"
-                flagged=True
+                flagged=True,
+                reasoning="Second problem",
+                source_agent="test"
             ),
             CritiqueResult(
                 id="c3",
@@ -353,9 +353,9 @@ class TestCritiqueSpanAnalysis:
                 span_end=110,
                 claim="Minor concern",
                 confidence=0.65,
-                flagged=False
-                           reasoning="Minor issue",
-                           source_agent="test"
+                flagged=False,
+                reasoning="Minor issue",
+                source_agent="test"
             ),
         ]
         

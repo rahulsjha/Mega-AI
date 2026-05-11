@@ -1,6 +1,5 @@
 """
 Context Budget Manager - manages token allocation and consumption tracking.
-
 Ensures agents stay within budget, tracks compression, and logs policy violations.
 """
 
@@ -25,26 +24,10 @@ class ContextBudgetManager:
     """
     
     def __init__(self, default_budget_tokens: int = 4000):
-        """
-        Initialize the budget manager.
-        
-        Args:
-            default_budget_tokens: Default token budget per agent
-        """
         self.default_budget_tokens = default_budget_tokens
         self.budgets: Dict[str, TokenBudget] = {}
     
     def declare_budget(self, agent_name: str, max_tokens: Optional[int] = None) -> TokenBudget:
-        """
-        Declare a budget for an agent.
-        
-        Args:
-            agent_name: Name of the agent
-            max_tokens: Maximum tokens (uses default if None)
-            
-        Returns:
-            The TokenBudget object
-        """
         if max_tokens is None:
             max_tokens = self.default_budget_tokens
         
@@ -62,15 +45,6 @@ class ContextBudgetManager:
         return budget
     
     def check_remaining(self, agent_name: str) -> int:
-        """
-        Check remaining tokens for an agent.
-        
-        Args:
-            agent_name: Name of the agent
-            
-        Returns:
-            Remaining tokens (0 if over budget)
-        """
         if agent_name not in self.budgets:
             self.declare_budget(agent_name)
         
@@ -83,23 +57,11 @@ class ContextBudgetManager:
         tokens: int,
         context: Optional[AgentContext] = None
     ) -> bool:
-        """
-        Consume tokens from an agent's budget.
-        
-        Args:
-            agent_name: Name of the agent
-            tokens: Number of tokens to consume
-            context: Context object to record violations
-            
-        Returns:
-            True if consumption succeeded, False if over budget
-        """
         if agent_name not in self.budgets:
             self.declare_budget(agent_name)
         
         budget = self.budgets[agent_name]
         
-        # Check if this would exceed budget
         if budget.consumed_tokens + tokens > budget.max_tokens:
             logger.warning(
                 f"Budget exceeded for {agent_name}: "
@@ -111,7 +73,6 @@ class ContextBudgetManager:
                 }
             )
             
-            # Record policy violation if context provided
             if context:
                 violation = PolicyViolation(
                     id=str(uuid.uuid4()),
@@ -144,28 +105,17 @@ class ContextBudgetManager:
             }
         )
         
-        # Check if compression threshold reached (80%)
         if budget.percent_used >= 80:
             logger.info(
                 f"Compression threshold reached for {agent_name}: {budget.percent_used:.1f}% used",
                 extra={"agent_name": agent_name, "percent_used": budget.percent_used}
             )
             if context:
-                # Mark that compression is needed
                 context.metadata["needs_compression"] = True
         
         return True
     
     def get_budget_status(self, agent_name: str) -> Dict:
-        """
-        Get detailed budget status for an agent.
-        
-        Args:
-            agent_name: Name of the agent
-            
-        Returns:
-            Dictionary with budget status
-        """
         if agent_name not in self.budgets:
             self.declare_budget(agent_name)
         
@@ -186,14 +136,6 @@ class ContextBudgetManager:
         tokens_freed: int,
         context: Optional[AgentContext] = None
     ) -> None:
-        """
-        Record that compression freed up tokens for an agent.
-        
-        Args:
-            agent_name: Name of the agent
-            tokens_freed: Number of tokens freed by compression
-            context: Context to record in
-        """
         if agent_name not in self.budgets:
             self.declare_budget(agent_name)
         
@@ -206,21 +148,9 @@ class ContextBudgetManager:
         )
     
     def sync_to_context(self, context: AgentContext) -> None:
-        """
-        Synchronize all budget states into the context object.
-        
-        Args:
-            context: The context to update
-        """
         context.context_budget = dict(self.budgets)
         logger.debug("Budget state synchronized to context")
     
     def load_from_context(self, context: AgentContext) -> None:
-        """
-        Load budget state from a context object.
-        
-        Args:
-            context: The context to load from
-        """
         self.budgets = dict(context.context_budget)
         logger.debug("Budget state loaded from context")

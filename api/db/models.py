@@ -28,7 +28,7 @@ class Job(Base):
     total_latency_ms = Column(Float, nullable=True)
     final_answer = Column(Text, nullable=True)
     error_message = Column(Text, nullable=True)
-    metadata = Column(JSON, default=dict)
+    job_metadata = Column("metadata", JSON, default=dict)
     
     # Relationships
     events = relationship("Event", back_populates="job", cascade="all, delete-orphan")

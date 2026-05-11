@@ -13,12 +13,11 @@ from api.context.schema import (
     AgentContext, AgentOutput, ProvenanceEntry
 )
 from api.context.budget import ContextBudgetManager
+from api.llm import build_openrouter_llm
+from langchain_openai import ChatOpenAI
 import os
 
 logger = logging.getLogger(__name__)
-
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
-
 
 class SynthesisAgent:
     """
@@ -42,13 +41,13 @@ class SynthesisAgent:
         self._init_llm()
     
     def _init_llm(self):
-        """Initialize LLM client based on provider."""
-        if LLM_PROVIDER == "anthropic":
-            from anthropic import Anthropic
-            self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        else:  # default to openai
-            from openai import OpenAI
-            self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        """Initialize LLM client."""
+        self.client = build_openrouter_llm(4000)
+        if self.client is not None:
+            return
+
+        from openai import OpenAI
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     
     async def execute(
         self,
@@ -83,29 +82,15 @@ class SynthesisAgent:
                 extra={"job_id": str(context.job_id)}
             )
             
-            # Build context for synthesis
             synthesis_context = self._build_context(context)
-            
-            # Create synthesis prompt
             prompt = self._create_prompt(synthesis_context, context)
-            
-            # Call LLM
             response = await self._call_llm(prompt, context.job_id)
-            
-            # Parse response
             final_answer, reasoning = self._parse_response(response)
-            
-            # Set final answer
             context.final_answer = final_answer
-            
-            # Build provenance map
             self._build_provenance_map(context, final_answer)
-            
-            # Track tokens
             token_count = self._estimate_tokens(prompt + response)
             budget_manager.consume(self.name, token_count, context)
-            
-            # Record output
+
             latency_ms = (time.time() - start_time) * 1000
             context.agent_outputs[self.name] = AgentOutput(
                 agent_name=self.name,
@@ -115,7 +100,6 @@ class SynthesisAgent:
                 confidence=0.9
             )
             
-            # Log contradictions resolved
             flagged_count = sum(1 for c in context.critique_results if c.flagged)
             logger.info(
                 f"Synthesis agent completed",
@@ -141,11 +125,9 @@ class SynthesisAgent:
         """Build a summary of all context for the synthesis prompt."""
         parts = []
         
-        # Add all agent outputs
         for agent_name, agent_output in context.agent_outputs.items():
             parts.append(f"Agent '{agent_name}' output: {agent_output.result}")
         
-        # Add critique flags
         if context.critique_results:
             flagged = [c for c in context.critique_results if c.flagged]
             if flagged:
@@ -156,7 +138,6 @@ class SynthesisAgent:
                         f"(confidence: {critique.confidence})"
                     )
         
-        # Add retrieved chunks
         if context.retrieved_chunks:
             parts.append("\nRetrieved Information:")
             for chunk in context.retrieved_chunks[:3]:  # Top 3
@@ -167,7 +148,6 @@ class SynthesisAgent:
     def _create_prompt(self, synthesis_context: str, context: AgentContext) -> str:
         """Create synthesis prompt."""
         flagged_count = sum(1 for c in context.critique_results if c.flagged)
-        
         return f"""You are an expert synthesizer. Your task is to combine the following information
 into a comprehensive, factually accurate final answer. You must:
 
@@ -204,25 +184,18 @@ Return as JSON:
     async def _call_llm(self, prompt: str, job_id) -> str:
         """Call the LLM."""
         try:
-            if LLM_PROVIDER == "anthropic":
-                message = self.client.messages.create(
-                    model="claude-3-sonnet-20240229",
-                    max_tokens=4000,
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                return message.content[0].text
-            else:  # OpenAI
-                response = self.client.chat.completions.create(
-                    model="gpt-4-turbo-preview",
-                    max_tokens=4000,
-                    response_format={"type": "json_object"},
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                return response.choices[0].message.content
+            if isinstance(self.client, ChatOpenAI):
+                message = self.client.invoke(prompt)
+                return message.content
+            response = self.client.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                max_tokens=4000,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return response.choices[0].message.content
         except Exception as e:
             logger.error(f"LLM call failed for synthesis: {str(e)}")
             raise
@@ -245,27 +218,20 @@ Return as JSON:
     def _build_provenance_map(self, context: AgentContext, final_answer: str):
         """
         Build provenance map linking sentences to sources.
-        
-        In a production system, this would use more sophisticated NLP
-        to match sentences in final_answer to sources.
         """
-        # Simple approach: split into sentences and link to sources
         sentences = final_answer.split(".")
         
         for idx, sentence in enumerate(sentences):
             if not sentence.strip():
                 continue
             
-            # Find which agent's output this likely came from
-            # (simplistic matching - in production would use embeddings)
             best_agent = None
             best_score = 0
             
             for agent_name, agent_output in context.agent_outputs.items():
-                if agent_name == "synthesis":  # Skip ourselves
+                if agent_name == "synthesis": 
                     continue
                 
-                # Count word overlap
                 words_in_sentence = set(sentence.lower().split())
                 words_in_output = set(agent_output.result.lower().split())
                 overlap = len(words_in_sentence & words_in_output)
@@ -276,7 +242,7 @@ Return as JSON:
             
             # Try to find a relevant chunk
             best_chunk_id = None
-            if best_score > 2:  # Meaningful overlap
+            if best_score > 2: 
                 for chunk in context.retrieved_chunks:
                     if any(word in chunk.content.lower()
                            for word in words_in_sentence if len(word) > 5):

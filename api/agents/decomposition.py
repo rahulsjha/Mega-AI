@@ -12,13 +12,11 @@ from api.context.schema import (
     AgentContext, SubTask, SubTaskType, SubTaskStatus, AgentOutput
 )
 from api.context.budget import ContextBudgetManager
+from api.llm import build_openrouter_llm
+from langchain_openai import ChatOpenAI
 import os
 
 logger = logging.getLogger(__name__)
-
-# Use environment to select LLM
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
-
 
 class DecompositionAgent:
     """
@@ -38,13 +36,13 @@ class DecompositionAgent:
         self._init_llm()
     
     def _init_llm(self):
-        """Initialize LLM client based on provider."""
-        if LLM_PROVIDER == "anthropic":
-            from anthropic import Anthropic
-            self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        else:  # default to openai
-            from openai import OpenAI
-            self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        """Initialize LLM client."""
+        self.client = build_openrouter_llm(2000)
+        if self.client is not None:
+            return
+
+        from openai import OpenAI
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     
     async def execute(
         self,
@@ -80,16 +78,10 @@ class DecompositionAgent:
                 extra={"job_id": str(context.job_id), "query": context.query}
             )
             
-            # Create decomposition prompt
             prompt = self._create_prompt(context.query)
-            
-            # Call LLM
             response = await self._call_llm(prompt, context.job_id)
-            
-            # Parse response to extract tasks
             tasks = self._parse_response(response)
             
-            # Add tasks to context
             for task in tasks:
                 context.sub_tasks.append(task)
                 logger.debug(
@@ -101,11 +93,9 @@ class DecompositionAgent:
                     }
                 )
             
-            # Track token usage
             token_count = self._estimate_tokens(prompt + response)
             budget_manager.consume(self.name, token_count, context)
-            
-            # Record output
+
             latency_ms = (time.time() - start_time) * 1000
             context.agent_outputs[self.name] = AgentOutput(
                 agent_name=self.name,
@@ -165,25 +155,18 @@ Return only valid JSON, no other text."""
     async def _call_llm(self, prompt: str, job_id) -> str:
         """Call the LLM with structured output."""
         try:
-            if LLM_PROVIDER == "anthropic":
-                message = self.client.messages.create(
-                    model="claude-3-sonnet-20240229",
-                    max_tokens=2000,
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                return message.content[0].text
-            else:  # OpenAI
-                response = self.client.chat.completions.create(
-                    model="gpt-4-turbo-preview",
-                    max_tokens=2000,
-                    response_format={"type": "json_object"},
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                return response.choices[0].message.content
+            if isinstance(self.client, ChatOpenAI):
+                message = self.client.invoke(prompt)
+                return message.content
+            response = self.client.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                max_tokens=2000,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return response.choices[0].message.content
         except Exception as e:
             logger.error(
                 f"LLM call failed for decomposition: {str(e)}",

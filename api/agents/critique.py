@@ -13,12 +13,11 @@ from api.context.schema import (
     AgentContext, CritiqueResult, AgentOutput
 )
 from api.context.budget import ContextBudgetManager
+from api.llm import build_openrouter_llm
+from langchain_openai import ChatOpenAI
 import os
 
 logger = logging.getLogger(__name__)
-
-LLM_PROVIDER = os.getenv("LLM_PROVIDER", "openai")
-
 
 class CritiqueAgent:
     """
@@ -39,13 +38,13 @@ class CritiqueAgent:
         self._init_llm()
     
     def _init_llm(self):
-        """Initialize LLM client based on provider."""
-        if LLM_PROVIDER == "anthropic":
-            from anthropic import Anthropic
-            self.client = Anthropic(api_key=os.getenv("ANTHROPIC_API_KEY"))
-        else:  # default to openai
-            from openai import OpenAI
-            self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+        """Initialize LLM client."""
+        self.client = build_openrouter_llm(3000)
+        if self.client is not None:
+            return
+
+        from openai import OpenAI
+        self.client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
     
     async def execute(
         self,
@@ -84,7 +83,6 @@ class CritiqueAgent:
             
             total_tokens = 0
             
-            # Critique each agent's output
             for agent_name, agent_output in context.agent_outputs.items():
                 if not agent_output.result:
                     continue
@@ -94,19 +92,10 @@ class CritiqueAgent:
                     extra={"agent_name": agent_name}
                 )
                 
-                # Create critique prompt
                 prompt = self._create_prompt(agent_output.result, agent_name)
-                
-                # Call LLM
                 response = await self._call_llm(prompt, context.job_id)
-                
-                # Parse response to extract critique results
                 results = self._parse_response(response, agent_output.result, agent_name)
-                
-                # Add results to context
                 context.critique_results.extend(results)
-                
-                # Track tokens
                 token_count = self._estimate_tokens(prompt + response)
                 total_tokens += token_count
                 
@@ -118,11 +107,9 @@ class CritiqueAgent:
                         "flagged_count": sum(1 for r in results if r.flagged)
                     }
                 )
-            
-            # Consume total tokens
+
+
             budget_manager.consume(self.name, total_tokens, context)
-            
-            # Record output
             flagged_count = sum(1 for c in context.critique_results if c.flagged)
             latency_ms = (time.time() - start_time) * 1000
             
@@ -196,25 +183,18 @@ Return only valid JSON, no other text."""
     async def _call_llm(self, prompt: str, job_id) -> str:
         """Call the LLM."""
         try:
-            if LLM_PROVIDER == "anthropic":
-                message = self.client.messages.create(
-                    model="claude-3-sonnet-20240229",
-                    max_tokens=3000,
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                return message.content[0].text
-            else:  # OpenAI
-                response = self.client.chat.completions.create(
-                    model="gpt-4-turbo-preview",
-                    max_tokens=3000,
-                    response_format={"type": "json_object"},
-                    messages=[
-                        {"role": "user", "content": prompt}
-                    ]
-                )
-                return response.choices[0].message.content
+            if isinstance(self.client, ChatOpenAI):
+                message = self.client.invoke(prompt)
+                return message.content
+            response = self.client.chat.completions.create(
+                model="gpt-4-turbo-preview",
+                max_tokens=3000,
+                response_format={"type": "json_object"},
+                messages=[
+                    {"role": "user", "content": prompt}
+                ]
+            )
+            return response.choices[0].message.content
         except Exception as e:
             logger.error(f"LLM call failed for critique: {str(e)}")
             raise
