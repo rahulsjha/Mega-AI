@@ -2,7 +2,7 @@ Working directory: /Users/vishaljha/Desktop/mega AI
 
 === Artifact ===
 Writing live output to /Users/vishaljha/Desktop/mega AI/scripts/complete_stream_response_with_test_cases.txt
-Temp workspace: /tmp/mega_ai_stream.2il3e4
+Temp workspace: /tmp/mega_ai_stream.jxoeR5
 Installing requirements from requirements.txt...
 Requirement already satisfied: pip in /Users/vishaljha/.pyenv/versions/3.10.13/lib/python3.10/site-packages (26.1.1)
 Collecting fastapi==0.104.1 (from -r requirements.txt (line 1))
@@ -45,21 +45,21 @@ Requirement already satisfied: passlib==1.7.4 in /Users/vishaljha/.pyenv/version
 Collecting structlog==23.2.0 (from -r requirements.txt (line 20))
   Using cached structlog-23.2.0-py3-none-any.whl.metadata (7.6 kB)
 Collecting uuid6==2025.0.1 (from -r requirements.txt (line 21))
-  Downloading uuid6-2025.0.1-py3-none-any.whl.metadata (10 kB)
+  Using cached uuid6-2025.0.1-py3-none-any.whl.metadata (10 kB)
 Collecting numpy==1.26.3 (from -r requirements.txt (line 22))
-  Downloading numpy-1.26.3-cp310-cp310-macosx_11_0_arm64.whl.metadata (61 kB)
+  Using cached numpy-1.26.3-cp310-cp310-macosx_11_0_arm64.whl.metadata (61 kB)
 Collecting scikit-learn==1.3.2 (from -r requirements.txt (line 23))
-  Downloading scikit_learn-1.3.2-cp310-cp310-macosx_12_0_arm64.whl.metadata (11 kB)
+  Using cached scikit_learn-1.3.2-cp310-cp310-macosx_12_0_arm64.whl.metadata (11 kB)
 Collecting typing-extensions==4.8.0 (from -r requirements.txt (line 24))
-  Downloading typing_extensions-4.8.0-py3-none-any.whl.metadata (3.0 kB)
+  Using cached typing_extensions-4.8.0-py3-none-any.whl.metadata (3.0 kB)
 Requirement already satisfied: redis==5.0.1 in /Users/vishaljha/.pyenv/versions/3.10.13/lib/python3.10/site-packages (from -r requirements.txt (line 25)) (5.0.1)
 Collecting anyio<4.0.0,>=3.7.1 (from fastapi==0.104.1->-r requirements.txt (line 1))
-  Downloading anyio-3.7.1-py3-none-any.whl.metadata (4.7 kB)
+  Using cached anyio-3.7.1-py3-none-any.whl.metadata (4.7 kB)
 Collecting starlette<0.28.0,>=0.27.0 (from fastapi==0.104.1->-r requirements.txt (line 1))
-  Downloading starlette-0.27.0-py3-none-any.whl.metadata (5.8 kB)
+  Using cached starlette-0.27.0-py3-none-any.whl.metadata (5.8 kB)
 Requirement already satisfied: annotated-types>=0.4.0 in /Users/vishaljha/.pyenv/versions/3.10.13/lib/python3.10/site-packages (from pydantic==2.5.0->-r requirements.txt (line 3)) (0.7.0)
 Collecting pydantic-core==2.14.1 (from pydantic==2.5.0->-r requirements.txt (line 3))
-  Downloading pydantic_core-2.14.1-cp310-cp310-macosx_11_0_arm64.whl.metadata (6.5 kB)
+  Using cached pydantic_core-2.14.1-cp310-cp310-macosx_11_0_arm64.whl.metadata (6.5 kB)
 Requirement already satisfied: click>=7.0 in /Users/vishaljha/.pyenv/versions/3.10.13/lib/python3.10/site-packages (from uvicorn==0.24.0->uvicorn[standard]==0.24.0->-r requirements.txt (line 2)) (8.2.1)
 Requirement already satisfied: h11>=0.8 in /Users/vishaljha/.pyenv/versions/3.10.13/lib/python3.10/site-packages (from uvicorn==0.24.0->uvicorn[standard]==0.24.0->-r requirements.txt (line 2)) (0.16.0)
 Requirement already satisfied: async-timeout>=4.0.3 in /Users/vishaljha/.pyenv/versions/3.10.13/lib/python3.10/site-packages (from asyncpg==0.29.0->-r requirements.txt (line 6)) (4.0.3)
@@ -78,15 +78,13 @@ Requirement already satisfied: tqdm>4 in /Users/vishaljha/.pyenv/versions/3.10.1
 Requirement already satisfied: PyYAML>=5.3 in /Users/vishaljha/.pyenv/versions/3.10.13/lib/python3.10/site-packages (from langchain==0.1.0->-r requirements.txt (line 14)) (6.0.3)
 Requirement already satisfied: dataclasses-json<0.7,>=0.5.7 in /Users/vishaljha/.pyenv/versions/3.10.13/lib/python3.10/site-packages (from langchain==0.1.0->-r requirements.txt (line 14)) (0.6.7)
 Requirement already satisfied: jsonpatch<2.0,>=1.33 in /Users/vishaljha/.pyenv/versions/3.10.13/lib/python3.10/site-packages (from langchain==0.1.0->-r requirements.txt (line 14)) (1.33)
-WARNING: Cache entry deserialization failed, entry ignored
 Collecting langchain-core<0.2,>=0.1.7 (from langchain==0.1.0->-r requirements.txt (line 14))
-  Downloading langchain_core-0.1.53-py3-none-any.whl.metadata (5.9 kB)
-WARNING: Cache entry deserialization failed, entry ignored
+  Using cached langchain_core-0.1.53-py3-none-any.whl.metadata (5.9 kB)
 Collecting langsmith<0.1.0,>=0.0.77 (from langchain==0.1.0->-r requirements.txt (line 14))
-  Downloading langsmith-0.0.92-py3-none-any.whl.metadata (9.9 kB)
+  Using cached langsmith-0.0.92-py3-none-any.whl.metadata (9.9 kB)
 Requirement already satisfied: requests<3,>=2 in /Users/vishaljha/.pyenv/versions/3.10.13/lib/python3.10/site-packages (from langchain==0.1.0->-r requirements.txt (line 14)) (2.33.1)
 Collecting tenacity<9.0.0,>=8.1.0 (from langchain==0.1.0->-r requirements.txt (line 14))
-  Downloading tenacity-8.5.0-py3-none-any.whl.metadata (1.2 kB)
+  Using cached tenacity-8.5.0-py3-none-any.whl.metadata (1.2 kB)
 INFO: pip is looking at multiple versions of langchain-openai to determine which version is compatible with other requirements. This could take a while.
 ERROR: Cannot install -r requirements.txt (line 14), -r requirements.txt (line 15) and -r requirements.txt (line 16) because these package versions have conflicting dependencies.
 
@@ -105,8 +103,7 @@ To fix this you could try to:
 ERROR: ResolutionImpossible: for help visit https://pip.pypa.io/en/latest/topics/dependency-resolution/#dealing-with-dependency-conflicts
 WARNING: requirements.txt installation failed; continuing with the current environment.
 WARNING: No LLM API key detected. The script will still run non-LLM endpoints and mark query/eval sections as skipped.
-Stopping existing process(es) on port 8000: 23579
 Starting backend (uvicorn) with DATABASE_URL=sqlite+aiosqlite:///./dev_test.db...
-uvicorn PID: 26599 (logs -> /tmp/uvicorn_stream.log)
+uvicorn PID: 61871 (logs -> /tmp/uvicorn_stream.log)
 Waiting up to 30s for server to be ready...
 Server did not become ready within 30s. Tail logs for diagnosis:
