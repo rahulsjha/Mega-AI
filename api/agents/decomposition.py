@@ -79,7 +79,15 @@ class DecompositionAgent:
             )
             
             prompt = self._create_prompt(context.query)
+            await context.emit_event("TOOL_CALL", {
+                "tool_name": "llm.decomposition",
+                "tool_input": {"prompt_preview": prompt[:300], "query": context.query}
+            }, agent_id=self.name)
             response = await self._call_llm(prompt, context.job_id)
+            await context.emit_event("TOOL_RESULT", {
+                "tool_name": "llm.decomposition",
+                "tool_output": {"response_preview": response[:500], "chars": len(response)}
+            }, agent_id=self.name)
             tasks = self._parse_response(response)
             
             for task in tasks:

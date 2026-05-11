@@ -9,6 +9,7 @@ Handles failures gracefully by re-routing or degrading.
 import logging
 import json
 import os
+import re
 from typing import Optional, List
 from api.context.schema import AgentContext, RoutingDecision, AgentOutput
 from api.context.budget import ContextBudgetManager
@@ -108,6 +109,7 @@ class MasterOrchestrator:
             
             try:
                 decision = await self._make_routing_decision(context)
+                decision.next_agent = self._normalize_next_agent(context, decision.next_agent)
             except Exception as e:
                 logger.error(
                     f"Routing decision failed: {str(e)}",
@@ -122,6 +124,7 @@ class MasterOrchestrator:
                     justification="Fallback due to routing error",
                     confidence=0.5
                 )
+                decision.next_agent = self._normalize_next_agent(context, decision.next_agent)
             
             context.routing_history.append(decision)
             
@@ -167,12 +170,14 @@ class MasterOrchestrator:
                     agent_start = time.time()
                     context = await agent.execute(context, self.budget_manager)
                     agent_latency = (time.time() - agent_start) * 1000
+                    agent_output = context.agent_outputs.get(decision.next_agent)
+                    output_tokens = len(agent_output.result.split()) if agent_output and agent_output.result else 0
                     
                     await context.emit_event("agent_done", {
                         "agent": decision.next_agent,
                         "iteration": iteration,
                         "latency_ms": agent_latency,
-                        "output_tokens": len(context.agent_outputs.get(decision.next_agent, {}).get("output", "").split())
+                        "output_tokens": output_tokens
                     }, agent_id=decision.next_agent, latency_ms=agent_latency)
                     
                 except Exception as e:
@@ -256,6 +261,24 @@ class MasterOrchestrator:
         decision = self._parse_routing_response(response)
         
         return decision
+
+    def _normalize_next_agent(self, context: AgentContext, proposed_next_agent: str) -> str:
+        """Force a deterministic route through the full pipeline when needed."""
+        stage_order = ["decomposition", "rag", "critique", "synthesis", "done"]
+        completed_agents = list(context.agent_outputs.keys())
+
+        if "synthesis" in completed_agents and context.final_answer:
+            return "done"
+
+        for stage in stage_order:
+            if stage == "done":
+                continue
+            if stage not in completed_agents:
+                return stage
+
+        if proposed_next_agent in {"decomposition", "rag", "critique", "synthesis", "done"}:
+            return proposed_next_agent
+        return "done"
     
     def _create_routing_prompt(
         self,
@@ -287,7 +310,10 @@ Current Status:
 Based on the query and current progress, decide which agent should run next.
 Valid next agents: {available_agents}{"," if can_synthesize else ""}{" synthesis, done" if can_synthesize else ""}
 
-Return JSON:
+Return ONLY a single valid JSON object. Do not wrap it in markdown, code fences, or commentary.
+Use one of the valid next agents exactly as written.
+
+Return JSON with this schema:
 {{
     "next_agent": "decomposition" | "rag" | "critique" | "synthesis" | "done",
     "justification": "why this agent is needed",
@@ -315,15 +341,31 @@ Return JSON:
     def _parse_routing_response(self, response: str) -> RoutingDecision:
         """Parse routing decision from LLM response."""
         try:
-            data = json.loads(response)
+            cleaned = response.strip()
+            if cleaned.startswith("```"):
+                cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+                cleaned = re.sub(r"\s*```$", "", cleaned)
+
+            if not cleaned.startswith("{"):
+                start = cleaned.find("{")
+                end = cleaned.rfind("}")
+                if start != -1 and end != -1 and end > start:
+                    cleaned = cleaned[start:end + 1]
+
+            data = json.loads(cleaned)
+            next_agent = data.get("next_agent", "done")
+            if next_agent not in {"decomposition", "rag", "critique", "synthesis", "done"}:
+                next_agent = "done"
+
             return RoutingDecision(
-                next_agent=data.get("next_agent", "done"),
+                next_agent=next_agent,
                 justification=data.get("justification", ""),
                 context_budget_allocation=data.get("context_budget_allocation", {}),
                 confidence=data.get("confidence", 0.8)
             )
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse routing response: {str(e)}")
+            logger.debug(f"Raw routing response: {response}")
             return RoutingDecision(
                 next_agent="done",
                 justification="Failed to parse routing decision",

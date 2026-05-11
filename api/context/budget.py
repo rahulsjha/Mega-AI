@@ -129,6 +129,22 @@ class ContextBudgetManager:
             "percent_used": budget.percent_used,
             "at_threshold": budget.percent_used >= 80
         }
+
+    def total_tokens_used(self) -> int:
+        """Return the total tokens consumed across all tracked budgets."""
+        return sum(budget.consumed_tokens for budget in self.budgets.values())
+
+    def total_tokens_available(self) -> int:
+        """Return the total budget capacity across all tracked budgets."""
+        return sum(budget.max_tokens for budget in self.budgets.values())
+
+    def remaining_percentage(self) -> float:
+        """Return the remaining percentage across all tracked budgets."""
+        total_available = self.total_tokens_available()
+        if total_available <= 0:
+            return 0.0
+        remaining = total_available - self.total_tokens_used()
+        return max(0.0, (remaining / total_available) * 100)
     
     def record_compression(
         self,

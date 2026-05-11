@@ -6,6 +6,7 @@ mutates its slice, and returns it to the orchestrator.
 """
 
 import logging
+import inspect
 from enum import Enum
 from typing import Optional, Any, Dict, List
 from uuid import UUID
@@ -128,6 +129,10 @@ class AgentOutput(BaseModel):
     confidence: float = Field(default=1.0, description="Confidence in the result")
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
+    def get(self, key: str, default: Any = None) -> Any:
+        """Dict-style compatibility for legacy call sites."""
+        return getattr(self, key, default)
+
 
 class RoutingDecision(BaseModel):
     """Decision made by the orchestrator on which agent to run next."""
@@ -221,6 +226,10 @@ class AgentContext(BaseModel):
     
     def model_dump_json(self, **kwargs) -> str:
         return super().model_dump_json(**kwargs)
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Return a plain dictionary representation for legacy callers."""
+        return self.model_dump(mode="json", exclude={"event_callbacks"})
     
     async def emit_event(self, event_type: str, data: Dict[str, Any], agent_id: Optional[str] = None, latency_ms: float = 0.0):
         """
@@ -243,6 +252,8 @@ class AgentContext(BaseModel):
         for callback in self.event_callbacks:
             try:
                 if callable(callback):
-                    await callback(event) if hasattr(callback, '__await__') else callback(event)
+                    result = callback(event)
+                    if inspect.isawaitable(result):
+                        await result
             except Exception as e:
                 logger.warning(f"Event callback failed: {e}")

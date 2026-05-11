@@ -157,7 +157,15 @@ class RAGAgent:
             logger.debug("RAG Hop 1: Initial retrieval")
             context.retrieval_iteration = 1
             
+            await context.emit_event("TOOL_CALL", {
+                "tool_name": "chroma.retrieve_hop1",
+                "tool_input": {"query": context.query, "k": 5}
+            }, agent_id=self.name)
             chunks_hop1 = await self._retrieve_chunks(context.query, k=5)
+            await context.emit_event("TOOL_RESULT", {
+                "tool_name": "chroma.retrieve_hop1",
+                "tool_output": {"chunks_found": len(chunks_hop1)}
+            }, agent_id=self.name)
             context.retrieved_chunks.extend(chunks_hop1)
             tokens_hop1 = self._estimate_tokens(context.query + str(chunks_hop1))
             total_tokens += tokens_hop1
@@ -169,7 +177,15 @@ class RAGAgent:
             
             # === Gap Analysis ===
             logger.debug("RAG Gap Analysis")
+            await context.emit_event("TOOL_CALL", {
+                "tool_name": "llm.gap_analysis",
+                "tool_input": {"query": context.query, "chunk_count": len(chunks_hop1)}
+            }, agent_id=self.name)
             gap_analysis = await self._analyze_gaps(context.query, chunks_hop1)
+            await context.emit_event("TOOL_RESULT", {
+                "tool_name": "llm.gap_analysis",
+                "tool_output": {"gaps": gap_analysis.get("gaps", []), "refined_queries": gap_analysis.get("refined_queries", [])}
+            }, agent_id=self.name)
             tokens_gap = self._estimate_tokens(gap_analysis)
             total_tokens += tokens_gap
             
@@ -186,7 +202,15 @@ class RAGAgent:
                 gap_queries = gap_analysis.get("refined_queries", [context.query])
                 
                 for gap_query in gap_queries[:2]:  # Limit to 2 additional queries
+                    await context.emit_event("TOOL_CALL", {
+                        "tool_name": "chroma.retrieve_hop2",
+                        "tool_input": {"query": gap_query, "k": 3}
+                    }, agent_id=self.name)
                     chunks_gap = await self._retrieve_chunks(gap_query, k=3)
+                    await context.emit_event("TOOL_RESULT", {
+                        "tool_name": "chroma.retrieve_hop2",
+                        "tool_output": {"gap_query": gap_query, "chunks_found": len(chunks_gap)}
+                    }, agent_id=self.name)
                     
                     # Avoid duplicates
                     existing_ids = {c.id for c in context.retrieved_chunks}
@@ -203,7 +227,15 @@ class RAGAgent:
             
             # === Synthesis ===
             logger.debug("RAG Synthesis: combining chunks")
+            await context.emit_event("TOOL_CALL", {
+                "tool_name": "llm.rag_synthesis",
+                "tool_input": {"query": context.query, "retrieved_chunk_count": len(context.retrieved_chunks)}
+            }, agent_id=self.name)
             synthesis = await self._synthesize_chunks(context.query, context.retrieved_chunks)
+            await context.emit_event("TOOL_RESULT", {
+                "tool_name": "llm.rag_synthesis",
+                "tool_output": {"response_preview": synthesis[:500], "chars": len(synthesis)}
+            }, agent_id=self.name)
             tokens_synthesis = self._estimate_tokens(synthesis)
             total_tokens += tokens_synthesis
             

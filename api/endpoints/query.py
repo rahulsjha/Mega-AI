@@ -30,12 +30,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["query-execution"])
 
 
+def _json_dumps(data: dict) -> str:
+    return json.dumps(data, default=str)
+
+
 class QueryRequest(BaseModel):
     """Request to submit a query."""
     query: str
 
 
-@asynccontextmanager
 async def stream_sse_events(job_id: UUID, db_session: AsyncSession):
     """
     Generate SSE events for a job with full trace protocol compliance.
@@ -77,7 +80,7 @@ async def stream_sse_events(job_id: UUID, db_session: AsyncSession):
         try:
             # Emit to SSE stream
             events_to_emit.append(event)
-            sse_data = f"data: {json.dumps(event)}\n\n"
+            sse_data = f"data: {_json_dumps(event)}\n\n"
             
             # Persist to database for audit trail
             await event_service.log_event(
@@ -145,7 +148,7 @@ async def stream_sse_events(job_id: UUID, db_session: AsyncSession):
         
         # Emit collected events from orchestrator
         for event in events_to_emit[1:]:  # Skip first since we already emitted start
-            yield f"data: {json.dumps(event)}\n\n"
+            yield f"data: {_json_dumps(event)}\n\n"
         
         # Emit job_complete event
         completion_event = {
@@ -201,7 +204,7 @@ async def stream_sse_events(job_id: UUID, db_session: AsyncSession):
         event_service = EventService(db_session)
         await event_service.log_event(job_id, "job_error", {"error": str(e)})
         
-        yield f"data: {json.dumps(error_event)}\n\n"
+        yield f"data: {_json_dumps(error_event)}\n\n"
 
 
 @router.post("/query", response_class=StreamingResponse, summary="Submit Query with SSE Streaming")
@@ -232,16 +235,15 @@ async def submit_query(request: QueryRequest, db_session: AsyncSession = Depends
             f"Query submitted (direct execution) | Job: {job.id} | Query: {request.query[:80]}"
         )
         
-        async with stream_sse_events(job.id, db_session_local) as event_stream:
-            return StreamingResponse(
-                event_stream,
-                media_type="text/event-stream",
-                headers={
-                    "Cache-Control": "no-cache",
-                    "X-Accel-Buffering": "no",
-                    "Connection": "keep-alive"
-                }
-            )
+        return StreamingResponse(
+            stream_sse_events(job.id, db_session_local),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "X-Accel-Buffering": "no",
+                "Connection": "keep-alive"
+            }
+        )
     except Exception as e:
         logger.error(f"Failed to create SSE stream: {str(e)}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))

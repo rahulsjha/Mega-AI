@@ -33,8 +33,6 @@ setup_logging()
 logger = logging.getLogger(__name__)
 
 
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown."""
@@ -91,13 +89,11 @@ app.include_router(logs.router)
 
 @app.on_event("startup")
 async def startup_event():
-    """Additional startup hooks if needed."""
     logger.info("FastAPI startup event completed")
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Additional shutdown hooks if needed."""
     logger.info("FastAPI shutdown event completed")
 
 

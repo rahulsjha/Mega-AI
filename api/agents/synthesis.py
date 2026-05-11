@@ -84,7 +84,15 @@ class SynthesisAgent:
             
             synthesis_context = self._build_context(context)
             prompt = self._create_prompt(synthesis_context, context)
+            await context.emit_event("TOOL_CALL", {
+                "tool_name": "llm.synthesis",
+                "tool_input": {"prompt_preview": prompt[:300], "context_summary_preview": synthesis_context[:300]}
+            }, agent_id=self.name)
             response = await self._call_llm(prompt, context.job_id)
+            await context.emit_event("TOOL_RESULT", {
+                "tool_name": "llm.synthesis",
+                "tool_output": {"response_preview": response[:500], "chars": len(response)}
+            }, agent_id=self.name)
             final_answer, reasoning = self._parse_response(response)
             context.final_answer = final_answer
             self._build_provenance_map(context, final_answer)
@@ -240,7 +248,9 @@ Return as JSON:
                     best_score = overlap
                     best_agent = agent_name
             
-            # Try to find a relevant chunk
+
+
+
             best_chunk_id = None
             if best_score > 2: 
                 for chunk in context.retrieved_chunks:

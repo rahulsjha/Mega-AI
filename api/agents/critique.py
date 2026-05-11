@@ -93,7 +93,15 @@ class CritiqueAgent:
                 )
                 
                 prompt = self._create_prompt(agent_output.result, agent_name)
+                await context.emit_event("TOOL_CALL", {
+                    "tool_name": f"llm.critique.{agent_name}",
+                    "tool_input": {"prompt_preview": prompt[:300], "source_agent": agent_name}
+                }, agent_id=self.name)
                 response = await self._call_llm(prompt, context.job_id)
+                await context.emit_event("TOOL_RESULT", {
+                    "tool_name": f"llm.critique.{agent_name}",
+                    "tool_output": {"response_preview": response[:500], "chars": len(response)}
+                }, agent_id=self.name)
                 results = self._parse_response(response, agent_output.result, agent_name)
                 context.critique_results.extend(results)
                 token_count = self._estimate_tokens(prompt + response)

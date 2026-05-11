@@ -7,7 +7,7 @@ from langchain_openai import ChatOpenAI
 
 def build_openrouter_llm(max_completion_tokens: int):
     """Build an OpenRouter-backed ChatOpenAI client when configured."""
-    api_key = os.getenv("OPENROUTER_API_KEY")
+    api_key = os.getenv("OPENROUTER_API_KEY") or os.getenv("OPEN_ROUTER_KEY")
     if not api_key:
         return None
 

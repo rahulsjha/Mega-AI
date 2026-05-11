@@ -141,39 +141,19 @@ class PolicyViolationLog(Base):
 
 
 class EvalRun(Base):
-    """Results from an evaluation run."""
+    """Results from a complete evaluation run."""
+
     __tablename__ = "eval_runs"
-    
+
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    test_case_id = Column(String, nullable=False)
-    group = Column(String, nullable=False)  # A, B, or C
-    
-    # Prompts and calls
-    prompts_used = Column(JSON, nullable=False)  # {agent_name: prompt}
-    tool_calls_made = Column(JSON, nullable=False)  # List of tool calls
-    outputs_received = Column(JSON, nullable=False)  # {agent_name: output}
-    
-    # Scores (all 0-1)
-    score_answer_correctness = Column(Float, nullable=False)
-    score_citation_accuracy = Column(Float, nullable=False)
-    score_contradiction_resolution = Column(Float, nullable=False)
-    score_tool_efficiency = Column(Float, nullable=False)
-    score_budget_compliance = Column(Float, nullable=False)
-    score_critique_agreement = Column(Float, nullable=False)
-    
-    # Justifications
-    justification_correctness = Column(Text, nullable=False)
-    justification_citation = Column(Text, nullable=False)
-    justification_contradiction = Column(Text, nullable=False)
-    justification_efficiency = Column(Text, nullable=False)
-    justification_budget = Column(Text, nullable=False)
-    justification_critique = Column(Text, nullable=False)
-    
+    run_id = Column(UUID(as_uuid=True), unique=True, nullable=False, index=True)
+    group = Column(String, nullable=True)
+    results = Column(JSON, nullable=False)
+    summary = Column(JSON, nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
-    
+
     __table_args__ = (
         Index("ix_eval_runs_group", "group"),
-        Index("ix_eval_runs_test_case", "test_case_id"),
     )
 
 
