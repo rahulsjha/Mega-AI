@@ -5,8 +5,10 @@ Stores jobs, events, eval results, and prompt proposals.
 """
 
 from sqlalchemy import (
-    Column, String, Integer, Float, Boolean, DateTime, Text, JSON, UUID, ForeignKey, Enum, Index
+    Column, String, Integer, Float, Boolean, DateTime, Text, JSON, ForeignKey, Enum, Index
 )
+from sqlalchemy.types import TypeDecorator, CHAR
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import relationship
 from datetime import datetime
@@ -16,11 +18,41 @@ import enum
 Base = declarative_base()
 
 
+class GUID(TypeDecorator):
+    """Platform-independent GUID type.
+
+    Uses Postgresql's UUID type, otherwise stores as
+    CHAR(36) stringified UUID for SQLite and others.
+    """
+    impl = CHAR
+
+    def load_dialect_impl(self, dialect):
+        if dialect.name == "postgresql":
+            return dialect.type_descriptor(PG_UUID(as_uuid=True))
+        else:
+            return dialect.type_descriptor(CHAR(36))
+
+    def process_bind_param(self, value, dialect):
+        if value is None:
+            return value
+        if not isinstance(value, uuid.UUID):
+            value = uuid.UUID(str(value))
+        if dialect.name == "postgresql":
+            return value
+        else:
+            return str(value)
+
+    def process_result_value(self, value, dialect):
+        if value is None:
+            return value
+        return uuid.UUID(value)
+
+
 class Job(Base):
     """Represents a single orchestration job."""
     __tablename__ = "jobs"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     query = Column(Text, nullable=False)
     status = Column(String, default="pending")  # pending, running, completed, failed
     started_at = Column(DateTime, default=datetime.utcnow)
@@ -46,8 +78,8 @@ class Event(Base):
     """Structured log event for every significant action."""
     __tablename__ = "events"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    job_id = Column(GUID(), ForeignKey("jobs.id"), nullable=False)
     agent_id = Column(String, nullable=True)
     event_type = Column(String, nullable=False)  # agent_start, token, tool_call, agent_done, etc.
     input_hash = Column(String, nullable=True)
@@ -71,8 +103,8 @@ class ToolCall(Base):
     """Record of each tool call with full tracing."""
     __tablename__ = "tool_calls"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    job_id = Column(GUID(), ForeignKey("jobs.id"), nullable=False)
     tool_name = Column(String, nullable=False)
     input_hash = Column(String, nullable=False)
     input_preview = Column(Text, nullable=False)
@@ -99,8 +131,8 @@ class CritiqueLog(Base):
     """Log of critique results."""
     __tablename__ = "critique_logs"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    job_id = Column(GUID(), ForeignKey("jobs.id"), nullable=False)
     span_start = Column(Integer, nullable=False)
     span_end = Column(Integer, nullable=False)
     claim = Column(Text, nullable=False)
@@ -122,8 +154,8 @@ class PolicyViolationLog(Base):
     """Log of policy violations."""
     __tablename__ = "policy_violations"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    job_id = Column(UUID(as_uuid=True), ForeignKey("jobs.id"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    job_id = Column(GUID(), ForeignKey("jobs.id"), nullable=False)
     violation_type = Column(String, nullable=False)
     severity = Column(String, nullable=False)  # critical, warning, info
     agent_name = Column(String, nullable=False)
@@ -145,8 +177,8 @@ class EvalRun(Base):
 
     __tablename__ = "eval_runs"
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    run_id = Column(UUID(as_uuid=True), unique=True, nullable=False, index=True)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    run_id = Column(GUID(), unique=True, nullable=False, index=True)
     group = Column(String, nullable=True)
     results = Column(JSON, nullable=False)
     summary = Column(JSON, nullable=False)
@@ -161,7 +193,7 @@ class PromptProposal(Base):
     """Proposed prompt rewrite from meta-agent."""
     __tablename__ = "prompt_proposals"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
     prompt_id = Column(String, nullable=False)
     original_prompt = Column(Text, nullable=False)
     rewritten_prompt = Column(Text, nullable=False)
@@ -186,8 +218,8 @@ class EvalDelta(Base):
     """Score deltas after rerunning eval with new prompt."""
     __tablename__ = "eval_deltas"
     
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    proposal_id = Column(UUID(as_uuid=True), ForeignKey("prompt_proposals.id"), nullable=False)
+    id = Column(GUID(), primary_key=True, default=uuid.uuid4)
+    proposal_id = Column(GUID(), ForeignKey("prompt_proposals.id"), nullable=False)
     test_case_id = Column(String, nullable=False)
     
     # Delta scores (new - old)

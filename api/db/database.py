@@ -133,15 +133,17 @@ AsyncSessionLocal = None
 def setup_db():
     """Setup global database engine and session factory."""
     global engine, AsyncSessionLocal
-    
-    engine = create_async_engine(
-        DatabaseConfig.DATABASE_URL,
-        echo=False,
-        future=True,
-        pool_pre_ping=True,
-        pool_size=10,
-        max_overflow=20
-    )
+    # For SQLite (aiosqlite) the engine uses NullPool and does not accept
+    # pool_size/max_overflow options. Only pass pooling kwargs for DBs that
+    # support them (e.g., asyncpg/Postgres).
+    db_url = DatabaseConfig.DATABASE_URL
+    engine_kwargs = dict(echo=False, future=True)
+    # Treat any sqlite-based URL (e.g. sqlite:// or sqlite+aiosqlite://) as
+    # using the NullPool backend which does not accept pool size kwargs.
+    if "sqlite" not in db_url:
+        engine_kwargs.update(pool_pre_ping=True, pool_size=10, max_overflow=20)
+
+    engine = create_async_engine(db_url, **engine_kwargs)
     
     AsyncSessionLocal = sessionmaker(
         engine,
