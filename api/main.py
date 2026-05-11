@@ -1,95 +1,39 @@
 """
-FastAPI main application with all endpoints and SSE streaming.
+FastAPI Main Application
+
+Mega AI Multi-Agent Orchestration System
+- 5 specialized agents with LLM-powered routing
+- Comprehensive evaluation framework (15 cases, 6 dimensions, A/B/C groups)
+- Full TRACE_EVENT protocol for execution transparency
+- Database-backed audit trail (PostgreSQL)
+- Redis worker queue for async processing
+- Meta-agent optimization loop with A/B testing
+
+All endpoints are modular and imported from api/endpoints/ submodules:
+- health.py: Infrastructure connectivity checks
+- query.py: Direct execution with SSE streaming
+- jobs.py: Async queue management
+- evaluation.py: Evaluation harness and meta-agent loop
+- trace.py: Execution trace retrieval
+- logs.py: Event logs
+- documentation.py: API specification and endpoint discovery
 """
 
 import logging
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
-from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
-from uuid import UUID, uuid4
-import json
-import os
-from datetime import datetime
-from typing import Optional, AsyncGenerator, Callable
-import time
+from fastapi import FastAPI
+from typing import Optional
 
-from api.logging_config import setup_logging, StructuredLogger
-from api.db.database import setup_db, init_db, get_async_session, probe_db_connection
-from api.context.schema import AgentContext
+from api.logging_config import setup_logging
+from api.db.database import setup_db, init_db
 from api.context.budget import ContextBudgetManager
-from api.agents.orchestrator import MasterOrchestrator
-from api.eval.meta_agent import MetaAgent
-from api.db.models import EvalRun, PromptProposal
-from api.db.service import JobService, EventService, ToolCallService, EvalService, ProposalService
-from sqlalchemy import select, and_
-from sqlalchemy.ext.asyncio import AsyncSession
+
+# Import endpoint routers from modular submodules
+from api.endpoints import health, query, jobs, evaluation, trace, logs, documentation
 
 # Setup logging
 setup_logging()
 logger = logging.getLogger(__name__)
-
-
-# =====================
-# Request/Response Models
-# =====================
-
-class QueryRequest(BaseModel):
-    """Request to submit a query."""
-    query: str
-
-
-class QueryResponse(BaseModel):
-    """Response from query submission."""
-    job_id: UUID
-    message: str
-
-
-class TraceEvent(BaseModel):
-    """A single event in the execution trace."""
-    timestamp: datetime
-    event_type: str
-    agent_id: Optional[str] = None
-    data: dict
-
-
-class TraceResponse(BaseModel):
-    """Complete execution trace."""
-    job_id: UUID
-    query: str
-    events: list[TraceEvent]
-    final_answer: Optional[str] = None
-    status: str
-
-
-class EvalResult(BaseModel):
-    """Single evaluation result."""
-    score: float
-    justification: str
-    test_case_id: str
-
-
-class EvalSummary(BaseModel):
-    """Summary of latest eval run."""
-    run_timestamp: datetime
-    group_a_scores: dict[str, EvalResult]
-    group_b_scores: dict[str, EvalResult]
-    group_c_scores: dict[str, EvalResult]
-
-
-class ApprovalRequest(BaseModel):
-    """Request to approve a prompt proposal."""
-    proposal_id: str
-    decision: str  # "approve" or "reject"
-    reviewer_notes: Optional[str] = None
-
-
-class ApprovalResponse(BaseModel):
-    """Response to approval request."""
-    status: str
-    proposal_id: str
-    message: str
-    rerun_job_id: Optional[str] = None
 
 
 # =====================
@@ -100,9 +44,10 @@ class ApprovalResponse(BaseModel):
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown."""
     # Startup
-    logger.info("API starting up")
+    logger.info("=== Mega AI API Starting Up ===")
     setup_db()
     await init_db()
+    logger.info("Database initialized")
     
     # Initialize job queue
     from api.queue.job_queue import get_job_queue
@@ -113,13 +58,15 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         logger.warning(f"Failed to connect job queue (non-critical): {e}")
     
+    logger.info("API ready to accept requests")
     yield
     
     # Shutdown
-    logger.info("API shutting down")
+    logger.info("=== Mega AI API Shutting Down ===")
     try:
         job_queue = get_job_queue()
         await job_queue.disconnect()
+        logger.info("Job queue disconnected")
     except Exception as e:
         logger.warning(f"Error disconnecting job queue: {e}")
 
@@ -130,9 +77,12 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Mega AI - Multi-Agent Orchestrator",
-    description="Production-grade multi-agent LLM orchestration system",
+    description="Production-grade multi-agent LLM orchestration system with comprehensive evaluation framework",
     version="1.0.0",
-    lifespan=lifespan
+    lifespan=lifespan,
+    docs_url="/docs",
+    redoc_url="/redoc",
+    openapi_url="/openapi.json"
 )
 
 
@@ -141,15 +91,61 @@ app = FastAPI(
 # =====================
 
 budget_manager = ContextBudgetManager()
-orchestrator_instance: Optional[MasterOrchestrator] = None
-
-# Shared state for jobs (in production would be in database)
-jobs_state = {}
+orchestrator_instance: Optional[object] = None
 
 
 # =====================
-# Helper Functions
+# Register Endpoint Routers
 # =====================
+
+# Documentation (must be registered first for GET / to work)
+app.include_router(documentation.router)
+
+# Infrastructure
+app.include_router(health.router)
+
+# Query Execution
+app.include_router(query.router)
+
+# Job Queue Management
+app.include_router(jobs.router)
+
+# Evaluation Framework
+app.include_router(evaluation.router)
+
+# Trace and Logs
+app.include_router(trace.router)
+app.include_router(logs.router)
+
+
+# =====================
+# Middleware and Startup Events
+# =====================
+
+@app.on_event("startup")
+async def startup_event():
+    """Additional startup hooks if needed."""
+    logger.info("FastAPI startup event completed")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Additional shutdown hooks if needed."""
+    logger.info("FastAPI shutdown event completed")
+
+
+# =====================
+# Entry Point
+# =====================
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(
+        app,
+        host="0.0.0.0",
+        port=8000,
+        log_level="info"
+    )
 
 async def stream_sse_events(job_id: UUID, db_session: AsyncSession) -> AsyncGenerator[str, None]:
     """
